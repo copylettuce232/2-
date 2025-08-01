@@ -1,0 +1,555 @@
+import pygame
+import random
+import sys
+import time # 애니메이션 타이밍을 위해
+
+# --- 상수 설정 ---
+BOARD_SIZE = 4
+TILE_SIZE = 100 # 타일 하나의 픽셀 크기
+GAP = 10 # 타일 간 간격
+BOARD_WIDTH = BOARD_HEIGHT = BOARD_SIZE * TILE_SIZE + (BOARD_SIZE + 1) * GAP
+SCREEN_WIDTH = BOARD_WIDTH + 100 # 화면 너비 (여백 포함)
+SCREEN_HEIGHT = BOARD_HEIGHT + 150 # 화면 높이 (헤더/버튼 공간 포함)
+
+# 색상 정의
+WHITE = (255, 255, 255)
+LIGHT_ORANGE_BG = (255, 224, 178) # 게임 컨테이너 배경색 #ffe0b2
+GRID_CELL_COLOR = (128, 128, 128, 50) # 격자 셀 색상 (투명도 포함)
+TEXT_COLOR = (119, 110, 101) # 타일 숫자 텍스트 색상 #776e65
+BUTTON_COLOR = (255, 138, 101) # 다시 시작 버튼 색상 #ff8a65
+BUTTON_HOVER_COLOR = (255, 112, 67) # 다시 시작 버튼 호버 색상 #ff7043
+START_BUTTON_COLOR = (139, 195, 74) # 시작 버튼 색상 #8bc34a
+START_BUTTON_HOVER_COLOR = (124, 179, 66) # 시작 버튼 호버 색상 #7cb342
+WIN_COLOR = (0, 128, 0) # 승리 메시지 색상 (순수한 초록색)
+LOSE_COLOR = (255, 215, 0) # 패배 메시지 색상 (골든로드)
+
+# 타일 값에 따른 색상 정의
+TILE_COLORS = {
+    0: (205, 193, 180), # 빈 셀 배경색
+    2: (238, 228, 218),
+    4: (237, 224, 200),
+    8: (242, 177, 121),
+    16: (245, 149, 99),
+    32: (246, 124, 95),
+    64: (246, 94, 59),
+    128: (237, 207, 114),
+    256: (237, 204, 97),
+    512: (237, 200, 80),
+    1024: (237, 197, 63),
+    2048: (237, 194, 46)
+}
+SUPER_TILE_COLOR = (60, 58, 50) # 2048 이상 타일 색상 #3c3a32
+
+# 합쳐질 때 나타나는 서브리미널 메시지
+SUBLIMINAL_MESSAGES = [
+    "You’ve got this!",
+    "Keep going, you’re doing great!",
+    "Be proud of how far you’ve come!",
+    "Your potential is endless!"
+]
+
+# 애니메이션 설정
+MERGE_ANIMATION_DURATION = 0.3 # 타일 합쳐짐 애니메이션 지속 시간 (초)
+SUBLIMINAL_MESSAGE_DURATION = 0.7 # 서브리미널 메시지 지속 시간 (초)
+
+# --- 게임 상태 변수 ---
+board = [] # 게임 보드 (2D 리스트)
+is_game_over = False
+is_game_won = False
+is_game_started = False
+active_subliminal_messages = [] # 활성화된 서브리미널 메시지 리스트 {text, x, y, start_time, initial_y}
+active_merge_animations = {} # 활성화된 합쳐짐 애니메이션 딕셔너리 {(row, col): start_time}
+
+# --- Pygame 초기 설정 ---
+pygame.init()
+pygame.display.set_caption("2048 게임") # 창 제목
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT)) # 화면 크기 설정
+clock = pygame.time.Clock() # 프레임 속도 제어를 위한 Clock 객체
+
+# 폰트 로드 (Jua.ttf 파일이 없으면 기본 폰트 사용)
+try:
+    font_jua_large = pygame.font.Font("Jua.ttf", 60)
+    font_jua_medium = pygame.font.Font("Jua.ttf", 36)
+    font_jua_small = pygame.font.Font("Jua.ttf", 24)
+    font_jua_subliminal = pygame.font.Font("Jua.ttf", 20)
+    font_jua_title = pygame.font.Font("Jua.ttf", 80)
+except:
+    print("Jua.ttf 폰트를 찾을 수 없습니다. Pygame 기본 폰트를 사용합니다.")
+    font_jua_large = pygame.font.Font(None, 60)
+    font_jua_medium = pygame.font.Font(None, 36)
+    font_jua_small = pygame.font.Font(None, 24)
+    font_jua_subliminal = pygame.font.Font(None, 20)
+    font_jua_title = pygame.font.Font(None, 80)
+
+# --- 헬퍼 함수 ---
+
+def get_tile_pixel_pos(row, col):
+    """
+    타일의 픽셀 위치를 계산합니다.
+    게임 보드의 좌측 상단 오프셋을 고려합니다.
+    """
+    board_offset_x = (SCREEN_WIDTH - BOARD_WIDTH) // 2
+    board_offset_y = (SCREEN_HEIGHT - BOARD_HEIGHT) // 2 + 30 + 60 # 게임 컨테이너 헤더 아래
+    
+    x = board_offset_x + GAP + col * (TILE_SIZE + GAP)
+    y = board_offset_y + GAP + row * (TILE_SIZE + GAP)
+    return x, y
+
+def draw_rounded_rect(surface, color, rect, radius, border_width=0, border_color=(0,0,0)):
+    """
+    둥근 모서리 사각형을 그립니다.
+    Pygame은 기본적으로 둥근 모서리를 지원하지 않으므로, border_radius를 사용하여 근사치를 그립니다.
+    """
+    pygame.draw.rect(surface, color, rect, border_radius=radius)
+    if border_width > 0:
+        # 테두리는 별도의 사각형으로 그립니다.
+        pygame.draw.rect(surface, border_color, rect, border_width, border_radius=radius)
+
+def get_tile_color(value):
+    """주어진 타일 값에 해당하는 색상을 반환합니다."""
+    if value >= 2048:
+        return SUPER_TILE_COLOR
+    return TILE_COLORS.get(value, TILE_COLORS[0]) # 기본적으로 빈 셀 색상 반환
+
+# --- 게임 로직 함수 ---
+
+def initialize_game():
+    """게임 보드와 상태를 초기화합니다."""
+    global board, is_game_over, is_game_won, active_subliminal_messages, active_merge_animations
+    board = [[0 for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
+    is_game_over = False
+    is_game_won = False
+    active_subliminal_messages = []
+    active_merge_animations = {}
+
+def add_random_tile():
+    """무작위 빈 공간에 새 타일 (2 또는 4)을 추가합니다."""
+    empty_cells = []
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
+            if board[r][c] == 0:
+                empty_cells.append((r, c))
+
+    if empty_cells:
+        r, c = random.choice(empty_cells)
+        board[r][c] = 2 if random.random() < 0.9 else 4
+        return True
+    return False
+
+def is_board_full():
+    """보드가 완전히 채워졌는지 확인합니다."""
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
+            if board[r][c] == 0:
+                return False
+    return True
+
+def can_move():
+    """이동 가능한 타일이 있는지 확인합니다 (게임 오버 조건)."""
+    if not is_board_full():
+        return True # 빈 공간이 있으면 이동 가능
+
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
+            current_value = board[r][c]
+            if current_value == 0: continue
+
+            # 오른쪽 타일과 비교
+            if c < BOARD_SIZE - 1 and board[r][c+1] == current_value:
+                return True
+            # 아래쪽 타일과 비교
+            if r < BOARD_SIZE - 1 and board[r+1][c] == current_value:
+                return True
+    return False # 이동할 수 있는 타일이 없음
+
+def slide_and_merge_line(line, is_reverse, fixed_coord, axis):
+    """
+    한 줄 (행 또는 열)의 타일을 이동하고 합칩니다.
+    새로운 줄과 합쳐진 타일의 위치 목록을 반환합니다.
+    """
+    filtered_line = [val for val in line if val != 0] # 빈 셀 제거
+    new_line = [] # 새롭게 구성될 타일 리스트
+    merged_positions = [] # 서브리미널 메시지를 위한 (r, c) 위치 저장
+
+    if is_reverse: # 오른쪽 또는 아래로 이동
+        i = len(filtered_line) - 1
+        while i >= 0:
+            current_val = filtered_line[i]
+            if i > 0 and filtered_line[i-1] == current_val:
+                new_line.insert(0, current_val * 2)
+                # 합쳐진 타일 위치 저장 (메시지 표시용)
+                if axis == 'row':
+                    merged_positions.append((fixed_coord, BOARD_SIZE - len(new_line)))
+                else: # col
+                    merged_positions.append((BOARD_SIZE - len(new_line), fixed_coord))
+                i -= 1 # 다음 타일은 이미 합쳐졌으므로 건너뛰기
+            else:
+                new_line.insert(0, current_val)
+            i -= 1
+    else: # 왼쪽 또는 위로 이동
+        i = 0
+        while i < len(filtered_line):
+            current_val = filtered_line[i]
+            if i + 1 < len(filtered_line) and filtered_line[i+1] == current_val:
+                new_line.append(current_val * 2)
+                # 합쳐진 타일 위치 저장 (메시지 표시용)
+                if axis == 'row':
+                    merged_positions.append((fixed_coord, len(new_line) - 1))
+                else: # col
+                    merged_positions.append((len(new_line) - 1, fixed_coord))
+                i += 1 # 다음 타일은 이미 합쳐졌으므로 건너뛰기
+            else:
+                new_line.append(current_val)
+            i += 1
+    
+    # 원래 길이만큼 0으로 채우기
+    new_line.extend([0] * (BOARD_SIZE - len(new_line)))
+    return new_line, merged_positions
+
+def move(direction):
+    """방향에 따라 타일 이동을 처리합니다."""
+    global board, active_subliminal_messages, active_merge_animations
+    
+    old_board = [row[:] for row in board] # 비교를 위한 보드 깊은 복사
+    merged_coords_for_messages = [] # 합쳐진 타일의 좌표를 저장
+
+    if direction == 'left':
+        for r in range(BOARD_SIZE):
+            new_row, merges = slide_and_merge_line(board[r], False, r, 'row')
+            board[r] = new_row
+            merged_coords_for_messages.extend(merges)
+    elif direction == 'right':
+        for r in range(BOARD_SIZE):
+            new_row, merges = slide_and_merge_line(board[r], True, r, 'row')
+            board[r] = new_row
+            merged_coords_for_messages.extend(merges)
+    elif direction == 'up':
+        for c in range(BOARD_SIZE):
+            col = [board[r][c] for r in range(BOARD_SIZE)]
+            new_col, merges = slide_and_merge_line(col, False, c, 'col')
+            for r in range(BOARD_SIZE):
+                board[r][c] = new_col[r]
+            merged_coords_for_messages.extend(merges)
+    elif direction == 'down':
+        for c in range(BOARD_SIZE):
+            col = [board[r][c] for r in range(BOARD_SIZE)]
+            new_col, merges = slide_and_merge_line(col, True, c, 'col')
+            for r in range(BOARD_SIZE):
+                board[r][c] = new_col[r]
+            merged_coords_for_messages.extend(merges)
+
+    if board != old_board: # 타일이 실제로 움직이거나 합쳐졌는지 확인
+        add_random_tile()
+        for r, c in merged_coords_for_messages:
+            # 합쳐짐 애니메이션과 서브리미널 메시지 트리거
+            active_merge_animations[(r, c)] = time.time()
+            show_subliminal_message(r, c)
+        return True
+    return False
+
+def check_game_status():
+    """승리/패배 조건을 확인합니다."""
+    global is_game_over, is_game_won
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
+            if board[r][c] == 2048:
+                is_game_won = True
+                end_game('win')
+                return
+
+    if not can_move():
+        is_game_over = True
+        end_game('lose')
+
+def end_game(status):
+    """게임 종료 및 결과 메시지를 표시합니다."""
+    global is_game_started
+    is_game_started = False # 게임 로직 중지
+    if status == 'win':
+        game_result_text = 'I\'ve grown up perfectly!'
+        game_result_color = WIN_COLOR
+    else: # lose
+        game_result_text = 'I\'ve grown up one more time!'
+        game_result_color = LOSE_COLOR
+    
+    # 화면을 반투명하게 덮습니다.
+    overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((255, 255, 255, 150)) # 흰색에 투명도 150
+    screen.blit(overlay, (0, 0))
+
+    # 메시지 텍스트 렌더링
+    text_surface = font_jua_large.render(game_result_text, True, game_result_color)
+    text_rect = text_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
+    screen.blit(text_surface, text_rect)
+
+    # '다시 시도' 버튼 렌더링
+    try_again_button_rect = pygame.Rect(0, 0, 200, 60)
+    try_again_button_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50)
+    draw_rounded_rect(screen, BUTTON_COLOR, try_again_button_rect, 10)
+    try_again_text = font_jua_medium.render("다시 시도", True, WHITE)
+    try_again_text_rect = try_again_text.get_rect(center=try_again_button_rect.center)
+    screen.blit(try_again_text, try_again_text_rect)
+    pygame.display.flip() # 화면 업데이트
+
+    # 버튼 클릭 또는 종료 대기
+    waiting_for_input = True
+    while waiting_for_input:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if try_again_button_rect.collidepoint(event.pos):
+                    waiting_for_input = False
+                    start_game() # 게임 재시작
+
+def show_subliminal_message(row, col):
+    """활성화된 메시지 목록에 서브리미널 메시지를 추가합니다."""
+    message_text = random.choice(SUBLIMINAL_MESSAGES)
+    x, y = get_tile_pixel_pos(row, col) # 타일의 실제 픽셀 위치
+    
+    # 메시지가 타일 중앙에서 살짝 위로 나타나도록 조정
+    message_x = x + TILE_SIZE // 2
+    message_y = y + TILE_SIZE // 2 - 20 
+    active_subliminal_messages.append({
+        'text': message_text,
+        'x': message_x,
+        'y': message_y,
+        'start_time': time.time(),
+        'initial_y': message_y # 위로 움직임을 위한 초기 Y 좌표 저장
+    })
+
+# --- 그리기 함수 ---
+
+def draw_background_text():
+    """배경에 'You're valuable.' 텍스트를 반복해서 그립니다."""
+    text_content = "You're valuable."
+    # 텍스트 표면을 한 번만 생성하고 회전
+    text_surface_raw = font_jua_small.render(text_content, True, (255, 165, 0)) # 오렌지색
+    rotated_text_surface = pygame.transform.rotate(text_surface_raw, 45) # 45도 회전
+    
+    # 투명도 조절을 위해 알파 채널이 있는 새 Surface 생성
+    alpha_surface = pygame.Surface(rotated_text_surface.get_size(), pygame.SRCALPHA)
+    alpha_surface.blit(rotated_text_surface, (0,0))
+    alpha_surface.set_alpha(100) # 투명도 100 (0-255)
+
+    rotated_text_rect = alpha_surface.get_rect()
+
+    # 겹치지 않으면서 배경을 채우기 위한 간격 계산
+    # 텍스트 길이에 따라 동적으로 간격을 조정합니다.
+    # 대략적인 텍스트 너비와 높이를 고려하여 간격을 설정합니다.
+    spacing_x = rotated_text_rect.width + 50 # 텍스트 너비 + 여백
+    spacing_y = rotated_text_rect.height + 50 # 텍스트 높이 + 여백
+
+    # 화면 전체를 회전된 텍스트로 채웁니다.
+    # 화면 경계를 넘어가는 부분도 그리기 위해 시작점을 음수로 설정합니다.
+    for x_offset in range(-rotated_text_rect.width, SCREEN_WIDTH + rotated_text_rect.width, spacing_x):
+        for y_offset in range(-rotated_text_rect.height, SCREEN_HEIGHT + rotated_text_rect.height, spacing_y):
+            screen.blit(alpha_surface, (x_offset, y_offset))
+
+
+def draw_game_board_elements():
+    """2048 게임 보드 요소 (격자 셀과 타일)를 그립니다."""
+    current_time = time.time()
+
+    # 게임 보드 영역의 좌측 상단 픽셀 위치
+    board_offset_x = (SCREEN_WIDTH - BOARD_WIDTH) // 2
+    board_offset_y = (SCREEN_HEIGHT - BOARD_HEIGHT) // 2 + 30 + 60 # 게임 컨테이너 헤더 아래
+
+    # 격자 셀 그리기
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
+            x = board_offset_x + GAP + c * (TILE_SIZE + GAP)
+            y = board_offset_y + GAP + r * (TILE_SIZE + GAP)
+            
+            # 투명한 배경색을 가진 Surface를 생성하여 투명도 적용
+            s = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            s.fill(GRID_CELL_COLOR) # RGBA 색상으로 투명도 설정
+            screen.blit(s, (x, y))
+            draw_rounded_rect(screen, GRID_CELL_COLOR, pygame.Rect(x, y, TILE_SIZE, TILE_SIZE), 8)
+
+
+    # 타일 그리기
+    for r in range(BOARD_SIZE):
+        for c in range(BOARD_SIZE):
+            value = board[r][c]
+            x, y = get_tile_pixel_pos(r, c) # 타일의 실제 픽셀 위치
+
+            if value != 0:
+                tile_color = get_tile_color(value)
+                tile_rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
+
+                # 합쳐짐 애니메이션 적용 (활성화된 경우)
+                scale_factor = 1.0
+                if (r, c) in active_merge_animations:
+                    elapsed = current_time - active_merge_animations[(r, c)]
+                    if elapsed < MERGE_ANIMATION_DURATION:
+                        progress = elapsed / MERGE_ANIMATION_DURATION
+                        if progress < 0.5:
+                            scale_factor = 1.0 + 0.4 * progress # 1.0에서 1.2로 커짐
+                        else:
+                            scale_factor = 1.2 - 0.4 * (progress - 0.5) # 1.2에서 1.0으로 다시 작아짐
+                        
+                        # 빛 효과를 위한 임시 Surface 생성
+                        temp_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                        temp_surface.fill(tile_color) # 타일 색상으로 채우기
+                        
+                        # 빛 효과 알파 값 계산 (0.5에서 최고)
+                        glow_alpha = 0
+                        if progress < 0.5:
+                            glow_alpha = int(255 * (progress / 0.5))
+                        else:
+                            glow_alpha = int(255 * (1 - (progress - 0.5) / 0.5))
+
+                        # 노란색 빛 효과 그리기 (간단한 그림자 효과)
+                        glow_color = (255, 255, 0, glow_alpha) # 투명도 조절된 노란색
+                        draw_rounded_rect(temp_surface, glow_color, temp_surface.get_rect(), 8)
+
+                        # 임시 Surface 크기 조절
+                        scaled_width = int(TILE_SIZE * scale_factor)
+                        scaled_height = int(TILE_SIZE * scale_factor)
+                        scaled_surface = pygame.transform.scale(temp_surface, (scaled_width, scaled_height))
+                        scaled_rect = scaled_surface.get_rect(center=tile_rect.center)
+                        screen.blit(scaled_surface, scaled_rect)
+
+                    else:
+                        del active_merge_animations[(r, c)] # 애니메이션 종료 시 제거
+
+                # 실제 타일 그리기 (애니메이션 중이 아니면)
+                if (r, c) not in active_merge_animations:
+                    draw_rounded_rect(screen, tile_color, tile_rect, 8, border_width=1, border_color=(0,0,0,30)) # 얇은 테두리 추가
+                
+                # 타일 값 그리기
+                text_surface = font_jua_large.render(str(value), True, TEXT_COLOR)
+                text_rect = text_surface.get_rect(center=tile_rect.center)
+                screen.blit(text_surface, text_rect)
+
+    # 서브리미널 메시지 그리기
+    messages_to_remove = []
+    for msg in active_subliminal_messages:
+        elapsed = current_time - msg['start_time']
+        if elapsed < SUBLIMINAL_MESSAGE_DURATION:
+            # 페이드 아웃 효과
+            alpha = max(0, 255 - int(255 * (elapsed / SUBLIMINAL_MESSAGE_DURATION) * 255)) # 알파값을 0-255 범위로
+            
+            # 위로 움직이는 효과
+            current_y = msg['initial_y'] - (elapsed / SUBLIMINAL_MESSAGE_DURATION) * 50 # 50픽셀 위로 이동
+            
+            text_surface = font_jua_subliminal.render(msg['text'], True, (76, 175, 80)) # 초록색
+            text_surface.set_alpha(alpha) # Surface에 알파값 적용
+            text_rect = text_surface.get_rect(center=(msg['x'], current_y))
+            screen.blit(text_surface, text_rect)
+        else:
+            messages_to_remove.append(msg)
+    
+    for msg in messages_to_remove:
+        active_subliminal_messages.remove(msg)
+
+
+def draw_start_screen():
+    """초기 시작 화면을 그립니다."""
+    screen.fill(WHITE)
+    draw_background_text() # 배경 텍스트 그리기
+
+    title_surface = font_jua_title.render("2048", True, (76, 175, 80)) # #4CAF50
+    title_rect = title_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 100))
+    screen.blit(title_surface, title_rect)
+
+    start_button_rect = pygame.Rect(0, 0, 250, 80)
+    start_button_rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50)
+    draw_rounded_rect(screen, START_BUTTON_COLOR, start_button_rect, 15)
+    start_text = font_jua_large.render("성장하기", True, WHITE)
+    start_text_rect = start_text.get_rect(center=start_button_rect.center)
+    screen.blit(start_text, start_text_rect)
+
+    pygame.display.flip() # 화면 업데이트
+    return start_button_rect
+
+def draw_game_screen():
+    """메인 게임 화면을 그립니다."""
+    screen.fill(WHITE) # 메인 배경
+    draw_background_text() # 배경 텍스트
+    
+    # 게임 컨테이너 배경 그리기
+    game_container_rect = pygame.Rect(
+        (SCREEN_WIDTH - BOARD_WIDTH) // 2, 
+        (SCREEN_HEIGHT - BOARD_HEIGHT) // 2 + 30, # 헤더 공간을 위해 조정
+        BOARD_WIDTH, 
+        BOARD_HEIGHT + 70 # 헤더 공간 추가
+    )
+    draw_rounded_rect(screen, LIGHT_ORANGE_BG, game_container_rect, 15)
+
+    # 헤더 (버튼) 그리기
+    reset_button_rect = pygame.Rect(0, 0, 150, 40)
+    reset_button_rect.topright = (game_container_rect.right - 20, game_container_rect.top + 20)
+    draw_rounded_rect(screen, BUTTON_COLOR, reset_button_rect, 10)
+    reset_text = font_jua_small.render("다시 시작", True, WHITE)
+    reset_text_rect = reset_text.get_rect(center=reset_button_rect.center)
+    screen.blit(reset_text, reset_text_rect)
+
+    # 실제 게임 보드와 타일 그리기
+    draw_game_board_elements() 
+    
+    return reset_button_rect
+
+# --- 메인 게임 루프 ---
+def game_loop():
+    global is_game_started, is_game_over, is_game_won
+
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            
+            if not is_game_started:
+                # 시작 화면 이벤트 처리
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if start_button_rect.collidepoint(event.pos):
+                        initialize_game()
+                        start_game()
+            else:
+                # 게임 이벤트 처리
+                if event.type == pygame.KEYDOWN:
+                    if not is_game_over and not is_game_won:
+                        if event.key == pygame.K_LEFT:
+                            move('left')
+                        elif event.key == pygame.K_RIGHT:
+                            move('right')
+                        elif event.key == pygame.K_UP:
+                            move('up')
+                        elif event.key == pygame.K_DOWN:
+                            move('down')
+                        check_game_status() # 매 이동 후 상태 확인
+
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    # '다시 시작' 버튼 클릭 처리
+                    if reset_button_rect.collidepoint(event.pos):
+                        initialize_game()
+                        start_game()
+        
+        # 화면 그리기
+        screen.fill(WHITE) # 화면 지우기
+        draw_background_text() # 배경 텍스트 먼저 그리기
+
+        if is_game_started:
+            reset_button_rect = draw_game_screen() # 게임 UI 그리기
+        else:
+            start_button_rect = draw_start_screen() # 시작 화면 그리기
+
+        pygame.display.flip() # 전체 화면 업데이트
+        clock.tick(60) # 프레임 속도를 60 FPS로 제한
+
+    pygame.quit()
+    sys.exit()
+
+def start_game():
+    """게임을 시작합니다 (시작 화면 숨기기, 초기 타일 추가)."""
+    global is_game_started
+    is_game_started = True
+    add_random_tile()
+    add_random_tile()
+
+# 초기 게임 설정 및 루프 시작
+initialize_game()
+game_loop()
