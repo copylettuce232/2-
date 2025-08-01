@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Calendar Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        table {
+            margin: auto;
+            border-collapse: collapse;
+        }
+        th, td {
+            width: 60px;
+            height: 60px;
+            border: 1px solid #aaa;
+            text-align: center;
+            padding: 0;
+            vertical-align: top;
+        }
+        th {
+            background-color: #f0f0f0;
+        }
+        #month-year {
+            font-size: 24px;
+            margin: 20px 0;
+        }
+        button {
+            font-size: 16px;
+            padding: 10px 20px;
+            margin: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .date-btn {
+            width: 100%;
+            height: 30px;
+            border: none;
+            background: none;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .date-btn:hover {
+            background-color: #d4f4dd;
+        }
+        .mood-display {
+            font-size: 18px;
+            margin-top: 3px;
+        }
+        .other-month {
+            background-color: black;
+            color: white;
+        }
+        .other-month .date-btn {
+            cursor: default;
+            color: #bbb;
+        }
+        .other-month .mood-display {
+            visibility: hidden;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 20px;
+            width: 300px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        select {
+            font-size: 16px;
+            padding: 5px;
+            margin-top: 10px;
+        }
+        .save-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            font-size: 14px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .save-btn:hover {
+            background-color: #1976D2;
+        }
+    </style>
+</head>
+<body>
+
+    <h1 id="month-year"></h1>
+    <button onclick="changeMonth(-1)">이전 달</button>
+    <button onclick="changeMonth(1)">다음 달</button>
+    <button onclick="location.href='index.html'">📋 메인 메뉴로 돌아가기</button>
+    <table id="calendar"></table>
+
+    <div id="moodModal" class="modal">
+        <div class="modal-content">
+            <h3 id="modal-title"></h3>
+            <label for="mood">기분을 선택하세요 (0~5):</label><br>
+            <select id="mood">
+                <option value="0">0 - 없음</option>
+                <option value="1">1 - 매우 나쁨 😡</option>
+                <option value="2">2 - 나쁨 😞</option>
+                <option value="3">3 - 보통 😐</option>
+                <option value="4">4 - 좋음 🙂</option>
+                <option value="5">5 - 매우 좋음 😄</option>
+            </select><br>
+            <button class="save-btn" onclick="saveMood()">저장</button>
+        </div>
+    </div>
+
+    <script>
+        let today = new Date();
+        let currentYear = today.getFullYear();
+        let currentMonth = today.getMonth();
+        let selectedDate = null;
+
+        const moodEmojis = {
+            1: "😡",
+            2: "😞",
+            3: "😐",
+            4: "🙂",
+            5: "😄"
+        };
+
+        function openMoodInput(year, month, day) {
+            selectedDate = { year, month, day };
+            document.getElementById("modal-title").textContent = `${year}년 ${month + 1}월 ${day}일 기분 입력`;
+            const key = `${year}-${month + 1}-${day}`;
+            const prevMood = localStorage.getItem(key);
+            const moodSelect = document.getElementById("mood");
+            moodSelect.value = prevMood !== null ? prevMood : "3";
+            document.getElementById("moodModal").style.display = "block";
+        }
+
+        function saveMood() {
+            const moodValue = document.getElementById("mood").value;
+            const { year, month, day } = selectedDate;
+            const key = `${year}-${month + 1}-${day}`;
+            localStorage.setItem(key, moodValue);
+            document.getElementById("moodModal").style.display = "none";
+            renderCalendar(currentYear, currentMonth);
+        }
+
+        window.onclick = function(event) {
+            const modal = document.getElementById("moodModal");
+            if (event.target === modal) {
+                modal.style.display = "none";
+            }
+        }
+
+        function renderCalendar(year, month) {
+            const firstDay = new Date(year, month, 1).getDay();
+            const lastDate = new Date(year, month + 1, 0).getDate();
+            const prevLastDate = new Date(year, month, 0).getDate();
+
+            const title = document.getElementById("month-year");
+            const calendar = document.getElementById("calendar");
+            title.textContent = `${year}년 ${month + 1}월`;
+
+            let html = "<tr>";
+            const days = ["일", "월", "화", "수", "목", "금", "토"];
+            for (let day of days) html += `<th>${day}</th>`;
+            html += "</tr><tr>";
+
+            for (let i = 0; i < firstDay; i++) {
+                const prevDay = prevLastDate - firstDay + i + 1;
+                html += `<td class="other-month"><button class="date-btn" disabled>${prevDay}</button><div class="mood-display">-</div></td>`;
+            }
+
+            for (let d = 1; d <= lastDate; d++) {
+                if ((firstDay + d - 1) % 7 === 0 && d !== 1) html += "</tr><tr>";
+                const key = `${year}-${month + 1}-${d}`;
+                const mood = localStorage.getItem(key);
+                const moodDisplay = (mood !== null && mood !== "0" && moodEmojis[mood])
+                    ? `<div class="mood-display">${moodEmojis[mood]}</div>`
+                    : `<div class="mood-display" style="color:#ccc">-</div>`;
+                html += `<td><button class="date-btn" onclick="openMoodInput(${year}, ${month}, ${d})">${d}</button>${moodDisplay}</td>`;
+            }
+
+            const totalCells = firstDay + lastDate;
+            const nextCells = (7 - (totalCells % 7)) % 7;
+            for (let i = 1; i <= nextCells; i++) {
+                html += `<td class="other-month"><button class="date-btn" disabled>${i}</button><div class="mood-display">-</div></td>`;
+            }
+
+            html += "</tr>";
+            calendar.innerHTML = html;
+        }
+
+        function changeMonth(offset) {
+            currentMonth += offset;
+            if (currentMonth > 11) {
+                currentMonth = 0;
+                currentYear += 1;
+            } else if (currentMonth < 0) {
+                currentMonth = 11;
+                currentYear -= 1;
+            }
+            renderCalendar(currentYear, currentMonth);
+        }
+
+        window.onload = function() {
+            renderCalendar(currentYear, currentMonth);
+        }
+    </script>
+</body>
+</html>

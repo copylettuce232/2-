@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2048 게임</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent scrolling */
+        }
+        canvas {
+            display: block;
+            background-color: transparent; /* Canvas background will be drawn by JS */
+            border-radius: 15px; /* Match container border-radius */
+        }
+        .background-text {
+            position: absolute;
+            font-size: 0.875rem; /* text-sm */
+            font-weight: 700; /* font-bold */
+            color: #fb923c; /* orange-400 */
+            opacity: 0.1; /* opacity-10 */
+            transform: rotate(45deg);
+            pointer-events: none; /* Allow clicks to pass through */
+            white-space: nowrap;
+        }
+        .outline-text {
+            position: relative;
+            display: inline-block;
+        }
+        .outline-text::before {
+            content: attr(data-text);
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            color: black;
+            z-index: -1;
+            text-shadow: 1px 1px 0 black, -1px -1px 0 black, 1px -1px 0 black, -1px 1px 0 black,
+                         2px 0 0 black, -2px 0 0 black, 0 2px 0 black, 0 -2px 0 black;
+        }
+    </style>
+</head>
+<body class="flex justify-center items-center min-h-screen bg-gray-100 relative">
+
+    <!-- Background repeating text -->
+    <div id="background-text-container" class="absolute inset-0 overflow-hidden pointer-events-none"></div>
+
+    <!-- Main Game Container -->
+    <div id="game-container" class="bg-orange-200 p-4 rounded-xl shadow-lg relative" style="width: 550px; height: 600px;">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-green-600 text-5xl font-extrabold">2048</h1>
+            <button id="resetButton" class="bg-orange-400 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-150 ease-in-out">Reset</button>
+        </div>
+        <canvas id="gameCanvas" width="520" height="520" class="rounded-xl"></canvas>
+    </div>
+
+    <!-- Start Screen Overlay -->
+    <div id="startScreen" class="absolute inset-0 bg-white bg-opacity-80 flex flex-col justify-center items-center z-10">
+        <h2 class="text-green-600 text-7xl font-extrabold mb-8">2048</h2>
+        <button id="startButton" class="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-2xl shadow-lg text-3xl transition duration-150 ease-in-out">Let's growth!</button>
+    </div>
+
+    <!-- Game Over/Win Overlay -->
+    <div id="gameOverOverlay" class="absolute inset-0 bg-white bg-opacity-80 flex-col justify-center items-center z-20 hidden">
+        <h2 id="resultMessage" class="text-5xl font-extrabold mb-8 relative outline-text" data-text=""></h2>
+        <button id="tryAgainButton" class="bg-orange-400 hover:bg-orange-500 text-white font-bold py-3 px-6 rounded-lg shadow-md text-xl transition duration-150 ease-in-out">다시 시도</button>
+    </div>
+
+    <script>
+        // --- Constants ---
+        const BOARD_SIZE = 4;
+        const TILE_SIZE = 100;
+        const GAP = 10;
+        const BOARD_PIXEL_SIZE = BOARD_SIZE * TILE_SIZE + (BOARD_SIZE + 1) * GAP;
+
+        // Colors
+        const WHITE = '#ffffff';
+        const LIGHT_ORANGE_BG = '#ffe0b2';
+        const GRID_CELL_COLOR = 'rgba(128, 128, 128, 0.2)'; // Tailwind's gray-500 with opacity
+        const TEXT_COLOR = '#776e65';
+        const BUTTON_COLOR = '#ff8a65';
+        const BUTTON_HOVER_COLOR = '#ff7043';
+        const START_BUTTON_COLOR = '#8bc34a';
+        const START_BUTTON_HOVER_COLOR = '#7cb342';
+        const WIN_COLOR = '#008000'; // Pure green
+        const LOSE_COLOR = '#ffd700'; // Goldenrod
+        const BLACK = '#000000';
+
+        // Tile colors based on value
+        const TILE_COLORS = {
+            0: '#cdc1b4', // Empty cell background
+            2: '#eee4da',
+            4: '#ede0c8',
+            8: '#f2b179',
+            16: '#f59563',
+            32: '#f67c5f',
+            64: '#f65e3b',
+            128: '#edcf72',
+            256: '#edcc61',
+            512: '#edc850',
+            1024: '#edc53f',
+            2048: '#edc22e'
+        };
+        const SUPER_TILE_COLOR = '#3c3a32';
+
+        // Subliminal messages
+        const SUBLIMINAL_MESSAGES = [
+            "You’ve got this!",
+            "Keep going, you’re doing great!",
+            "Be proud of how far you’ve come!",
+            "Your potential is endless!"
+        ];
+
+        // Animation settings
+        const MERGE_ANIMATION_DURATION = 300; // milliseconds
+        const SUBLIMINAL_MESSAGE_DURATION = 700; // milliseconds
+        const MOVE_ANIMATION_DURATION = 150; // milliseconds
+        const NEW_TILE_FADE_IN_DURATION = 100; // milliseconds
+
+        // --- Game State Variables ---
+        let gameBoardState = []; // Stores Tile objects or null
+        let nextTileId = 0;
+        let allActiveTiles = []; // All tiles currently on screen (moving, new, disappearing)
+        let activeSubliminalMessages = []; // {text, x, y, startTime, initialY}
+        let isGameStarted = false;
+        let isGameOver = false;
+        let isGameWon = false;
+        let lastMoveTime = 0; // To prevent rapid multiple moves
+
+        // --- Canvas Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Elements
+        const startScreen = document.getElementById('startScreen');
+        const startButton = document.getElementById('startButton');
+        const resetButton = document.getElementById('resetButton');
+        const gameOverOverlay = document.getElementById('gameOverOverlay');
+        const resultMessageElem = document.getElementById('resultMessage');
+        const tryAgainButton = document.getElementById('tryAgainButton');
+        const backgroundTextContainer = document.getElementById('background-text-container');
+
+        // --- Helper Functions ---
+
+        // Function to draw a rounded rectangle on canvas
+        function roundRect(ctx, x, y, width, height, radius) {
+            if (width < 2 * radius) radius = width / 2;
+            if (height < 2 * radius) radius = height / 2;
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.arcTo(x + width, y, x + width, y + height, radius);
+            ctx.arcTo(x + width, y + height, x, y + height, radius);
+            ctx.arcTo(x, y + height, x, y, radius);
+            ctx.arcTo(x, y, x + width, y, radius);
+            ctx.closePath();
+        }
+
+        function getTilePixelPos(row, col) {
+            const x = GAP + col * (TILE_SIZE + GAP);
+            const y = GAP + row * (TILE_SIZE + GAP);
+            return { x, y };
+        }
+
+        function getTileColor(value) {
+            if (value >= 2048) {
+                return SUPER_TILE_COLOR;
+            }
+            return TILE_COLORS[value] || TILE_COLORS[0];
+        }
+
+        // --- Tile Class ---
+        class Tile {
+            constructor(value, row, col, id) {
+                this.value = value;
+                this.id = id;
+                this.current_row = row;
+                this.current_col = col;
+                const { x, y } = getTilePixelPos(row, col);
+                this.startX = x;
+                this.startY = y;
+                this.targetX = x;
+                this.targetY = y;
+                this.animationStartTime = performance.now();
+                this.isNew = true;
+                this.isMergedResult = false;
+                this.isDisappearing = false;
+                this.alpha = 0; // Start with 0 for fade-in
+            }
+
+            // Update target position for animation
+            setTarget(row, col) {
+                this.current_row = row;
+                this.current_col = col;
+                const { x, y } = getTilePixelPos(row, col);
+                this.startX = this.x || x; // Use current drawn position if available
+                this.startY = this.y || y;
+                this.targetX = x;
+                this.targetY = y;
+                this.animationStartTime = performance.now();
+            }
+
+            // Get current interpolated position
+            getAnimatedPosition(currentTime) {
+                let progress = (currentTime - this.animationStartTime) / MOVE_ANIMATION_DURATION;
+                progress = Math.min(1, Math.max(0, progress)); // Clamp between 0 and 1
+
+                const x = this.startX + (this.targetX - this.startX) * progress;
+                const y = this.startY + (this.targetY - this.startY) * progress;
+
+                this.x = x; // Store current drawn position
+                this.y = y;
+
+                return { x, y, progress };
+            }
+
+            // Get current alpha for fade in/out
+            getAnimatedAlpha(currentTime) {
+                if (this.isNew) {
+                    let progress = (currentTime - this.animationStartTime) / NEW_TILE_FADE_IN_DURATION;
+                    progress = Math.min(1, Math.max(0, progress));
+                    return Math.floor(255 * progress);
+                } else if (this.isDisappearing) {
+                    let progress = (currentTime - this.animationStartTime) / MOVE_ANIMATION_DURATION; // Use move duration for fade out
+                    progress = Math.min(1, Math.max(0, progress));
+                    return Math.floor(255 * (1 - progress));
+                }
+                return 255; // Fully opaque
+            }
+
+            // Get current scale for merge animation
+            getAnimatedScale(currentTime) {
+                if (this.isMergedResult) {
+                    let progress = (currentTime - this.animationStartTime) / MERGE_ANIMATION_DURATION;
+                    progress = Math.min(1, Math.max(0, progress));
+                    if (progress < 0.5) {
+                        return 1.0 + 0.2 * progress; // Grow from 1.0 to 1.1
+                    } else {
+                        return 1.1 - 0.2 * (progress - 0.5); // Shrink from 1.1 to 1.0
+                    }
+                }
+                return 1.0;
+            }
+        }
+
+        // --- Game Logic Functions ---
+
+        function initializeGame() {
+            gameBoardState = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+            nextTileId = 0;
+            allActiveTiles = [];
+            activeSubliminalMessages = [];
+            isGameWon = false;
+            isGameOver = false;
+            isGameStarted = false; // Will be set to true by start_game()
+            gameOverOverlay.classList.add('hidden'); // Hide overlay
+        }
+
+        function addRandomTile() {
+            const emptyCells = [];
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (gameBoardState[r][c] === null) {
+                        emptyCells.push({ r, c });
+                    }
+                }
+            }
+
+            if (emptyCells.length > 0) {
+                const { r, c } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+                const value = Math.random() < 0.9 ? 2 : 4;
+                const newTile = new Tile(value, r, c, nextTileId++);
+                gameBoardState[r][c] = newTile;
+                allActiveTiles.push(newTile);
+                return true;
+            }
+            return false;
+        }
+
+        function isBoardFull() {
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (gameBoardState[r][c] === null) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function canMove() {
+            if (!isBoardFull()) {
+                return true; // If there's an empty space, a move is possible
+            }
+
+            // Check for adjacent tiles with the same value
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const currentValue = gameBoardState[r][c].value;
+                    // Check right
+                    if (c < BOARD_SIZE - 1 && gameBoardState[r][c + 1].value === currentValue) {
+                        return true;
+                    }
+                    // Check down
+                    if (r < BOARD_SIZE - 1 && gameBoardState[r + 1][c].value === currentValue) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function slideAndMergeLine(lineOfTiles, isReverse) {
+            const filteredLine = lineOfTiles.filter(tile => tile !== null);
+            const processedLine = [];
+            const mergedResultsForAnimation = [];
+            const disappearingTilesForAnimation = [];
+
+            if (isReverse) {
+                let i = filteredLine.length - 1;
+                while (i >= 0) {
+                    const currentTile = filteredLine[i];
+                    if (i > 0 && filteredLine[i - 1].value === currentTile.value) {
+                        // Merge
+                        const keptTile = filteredLine[i - 1];
+                        const disappearingTile = currentTile;
+
+                        keptTile.value *= 2;
+                        keptTile.isMergedResult = true;
+                        keptTile.animationStartTime = performance.now();
+                        mergedResultsForAnimation.push(keptTile);
+
+                        disappearingTile.isDisappearing = true;
+                        disappearingTile.animationStartTime = performance.now();
+                        disappearingTilesForAnimation.push(disappearingTile);
+
+                        processedLine.unshift(keptTile);
+                        i -= 2;
+                    } else {
+                        processedLine.unshift(currentTile);
+                        i -= 1;
+                    }
+                }
+                while (processedLine.length < BOARD_SIZE) {
+                    processedLine.unshift(null);
+                }
+            } else { // Not reverse (left or up)
+                let i = 0;
+                while (i < filteredLine.length) {
+                    const currentTile = filteredLine[i];
+                    if (i + 1 < filteredLine.length && filteredLine[i + 1].value === currentTile.value) {
+                        // Merge
+                        const keptTile = currentTile;
+                        const disappearingTile = filteredLine[i + 1];
+
+                        keptTile.value *= 2;
+                        keptTile.isMergedResult = true;
+                        keptTile.animationStartTime = performance.now();
+                        mergedResultsForAnimation.push(keptTile);
+
+                        disappearingTile.isDisappearing = true;
+                        disappearingTile.animationStartTime = performance.now();
+                        disappearingTilesForAnimation.push(disappearingTile);
+
+                        processedLine.push(keptTile);
+                        i += 2;
+                    } else {
+                        processedLine.push(currentTile);
+                        i += 1;
+                    }
+                }
+                while (processedLine.length < BOARD_SIZE) {
+                    processedLine.push(null);
+                }
+            }
+            return { newLine: processedLine, mergedResults: mergedResultsForAnimation, disappearingTiles: disappearingTilesForAnimation };
+        }
+
+        function move(direction) {
+            if (performance.now() - lastMoveTime < MOVE_ANIMATION_DURATION) {
+                return false; // Prevent rapid moves during animation
+            }
+            lastMoveTime = performance.now();
+
+            const oldBoardState = gameBoardState.map(row => row.slice()); // Deep copy for comparison
+
+            let movedAnything = false;
+            const mergedResultTilesForMessages = [];
+            const tempDisappearingTiles = [];
+
+            // Reset animation properties for all active tiles before processing
+            allActiveTiles.forEach(tile => {
+                const { x, y } = getTilePixelPos(tile.current_row, tile.current_col);
+                tile.startX = x;
+                tile.startY = y;
+                tile.animationStartTime = performance.now();
+                tile.isNew = false;
+                tile.isMergedResult = false;
+                tile.isDisappearing = false;
+            });
+
+            const tempNewBoardState = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+
+            if (direction === 'left') {
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    const lineOfTiles = oldBoardState[r];
+                    const { newLine, mergedResults, disappearingTiles } = slideAndMergeLine(lineOfTiles, false);
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        tempNewBoardState[r][c] = newLine[c];
+                        if (newLine[c] !== null) {
+                            newLine[c].setTarget(r, c);
+                        }
+                    }
+                    mergedResultTilesForMessages.push(...mergedResults);
+                    tempDisappearingTiles.push(...disappearingTiles);
+                }
+            } else if (direction === 'right') {
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    const lineOfTiles = oldBoardState[r];
+                    const { newLine, mergedResults, disappearingTiles } = slideAndMergeLine(lineOfTiles, true);
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        tempNewBoardState[r][c] = newLine[c];
+                        if (newLine[c] !== null) {
+                            newLine[c].setTarget(r, c);
+                        }
+                    }
+                    mergedResultTilesForMessages.push(...mergedResults);
+                    tempDisappearingTiles.push(...disappearingTiles);
+                }
+            } else if (direction === 'up') {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const lineOfTiles = [];
+                    for (let r = 0; r < BOARD_SIZE; r++) {
+                        lineOfTiles.push(oldBoardState[r][c]);
+                    }
+                    const { newLine, mergedResults, disappearingTiles } = slideAndMergeLine(lineOfTiles, false);
+                    for (let r = 0; r < BOARD_SIZE; r++) {
+                        tempNewBoardState[r][c] = newLine[r];
+                        if (newLine[r] !== null) {
+                            newLine[r].setTarget(r, c);
+                        }
+                    }
+                    mergedResultTilesForMessages.push(...mergedResults);
+                    tempDisappearingTiles.push(...disappearingTiles);
+                }
+            } else if (direction === 'down') {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const lineOfTiles = [];
+                    for (let r = 0; r < BOARD_SIZE; r++) {
+                        lineOfTiles.push(oldBoardState[r][c]);
+                    }
+                    const { newLine, mergedResults, disappearingTiles } = slideAndMergeLine(lineOfTiles, true);
+                    for (let r = 0; r < BOARD_SIZE; r++) {
+                        tempNewBoardState[r][c] = newLine[r];
+                        if (newLine[r] !== null) {
+                            newLine[r].setTarget(r, c);
+                        }
+                    }
+                    mergedResultTilesForMessages.push(...mergedResults);
+                    tempDisappearingTiles.push(...disappearingTiles);
+                }
+            }
+
+            // Check if any tiles actually moved or merged
+            // Compare stringified versions of board states for simplicity
+            if (JSON.stringify(oldBoardState.map(row => row.map(tile => tile ? tile.id : null))) !==
+                JSON.stringify(tempNewBoardState.map(row => row.map(tile => tile ? tile.id : null))) ||
+                mergedResultTilesForMessages.length > 0) {
+                movedAnything = true;
+            }
+
+            if (movedAnything) {
+                gameBoardState = tempNewBoardState;
+                addRandomTile(); // Add a new tile after a successful move
+
+                // Trigger subliminal messages for merged tiles
+                mergedResultTilesForMessages.forEach(tile => {
+                    showSubliminalMessage(tile.current_row, tile.current_col);
+                });
+
+                // Reconstruct allActiveTiles to include current board tiles and disappearing tiles
+                const updatedActiveTiles = [];
+                gameBoardState.forEach(row => {
+                    row.forEach(tile => {
+                        if (tile !== null) {
+                            updatedActiveTiles.push(tile);
+                        }
+                    });
+                });
+                tempDisappearingTiles.forEach(tile => {
+                    if (tile.isDisappearing) { // Only add if still animating out
+                        updatedActiveTiles.push(tile);
+                    }
+                });
+                allActiveTiles = updatedActiveTiles;
+                return true;
+            }
+            return false;
+        }
+
+        function checkGameStatus() {
+            if (isGameWon || isGameOver) return; // Already ended
+
+            // Check for win condition
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const tile = gameBoardState[r][c];
+                    if (tile !== null && tile.value === 2048) {
+                        isGameWon = true;
+                        endGame('win');
+                        return;
+                    }
+                }
+            }
+
+            // Check for lose condition
+            if (!canMove()) {
+                isGameOver = true;
+                endGame('lose');
+            }
+        }
+
+        function endGame(status) {
+            isGameStarted = false;
+            gameOverOverlay.classList.remove('hidden');
+            gameOverOverlay.classList.add('flex'); // Show overlay
+
+            let message = '';
+            let textColor = '';
+            let buttonText = '다시 시도';
+
+            if (status === 'win') {
+                message = 'I\'ve grown up perfectly!';
+                textColor = WIN_COLOR;
+            } else { // lose
+                message = 'I\'ve grown up one more time!';
+                textColor = LOSE_COLOR;
+                buttonText = 'Growing Up Again';
+            }
+
+            resultMessageElem.textContent = message;
+            resultMessageElem.style.color = textColor;
+            resultMessageElem.setAttribute('data-text', message); // For CSS outline
+            tryAgainButton.textContent = buttonText;
+        }
+
+        function showSubliminalMessage(row, col) {
+            const messageText = SUBLIMINAL_MESSAGES[Math.floor(Math.random() * SUBLIMINAL_MESSAGES.length)];
+            const { x, y } = getTilePixelPos(row, col);
+            
+            activeSubliminalMessages.push({
+                text: messageText,
+                x: x + TILE_SIZE / 2, // Center of tile
+                y: y + TILE_SIZE / 2 - 20, // Slightly above center
+                startTime: performance.now(),
+                initialY: y + TILE_SIZE / 2 - 20
+            });
+        }
+
+        // --- Drawing Functions ---
+
+        function drawBackgroundText() {
+            const textContent = "You're valuable.";
+            const tempDiv = document.createElement('div');
+            tempDiv.style.position = 'absolute';
+            tempDiv.style.visibility = 'hidden';
+            tempDiv.style.fontFamily = 'Inter'; // Use a standard font for measurement
+            tempDiv.style.fontSize = '0.875rem'; // text-sm
+            tempDiv.style.fontWeight = '700'; // font-bold
+            tempDiv.textContent = textContent;
+            document.body.appendChild(tempDiv);
+            const textWidth = tempDiv.offsetWidth;
+            const textHeight = tempDiv.offsetHeight;
+            document.body.removeChild(tempDiv);
+
+            const spacingX = textWidth + 50;
+            const spacingY = textHeight + 50;
+
+            backgroundTextContainer.innerHTML = ''; // Clear previous text
+            const screenWidth = window.innerWidth;
+            const screenHeight = window.innerHeight;
+
+            for (let xOffset = -textWidth; xOffset < screenWidth + textWidth; xOffset += spacingX) {
+                for (let yOffset = -textHeight; yOffset < screenHeight + textHeight; yOffset += spacingY) {
+                    const textElem = document.createElement('div');
+                    textElem.className = 'background-text';
+                    textElem.textContent = textContent;
+                    textElem.style.left = `${xOffset}px`;
+                    textElem.style.top = `${yOffset}px`;
+                    backgroundTextContainer.appendChild(textElem);
+                }
+            }
+        }
+
+        function drawGame() {
+            const currentTime = performance.now();
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+
+            // Draw grid cells
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const { x, y } = getTilePixelPos(r, c);
+                    ctx.fillStyle = GRID_CELL_COLOR;
+                    roundRect(ctx, x, y, TILE_SIZE, TILE_SIZE, 8);
+                    ctx.fill();
+                }
+            }
+
+            // Draw and animate tiles
+            const tilesToRemove = [];
+            allActiveTiles.forEach(tile => {
+                const { x, y, progress } = tile.getAnimatedPosition(currentTime);
+                const alpha = tile.getAnimatedAlpha(currentTime);
+                const scale = tile.getAnimatedScale(currentTime);
+
+                if (alpha <= 0 && tile.isDisappearing) {
+                    tilesToRemove.push(tile);
+                    return; // Skip drawing fully faded out tiles
+                }
+                if (progress >= 1 && tile.isNew) {
+                    tile.isNew = false; // Animation finished
+                    tile.alpha = 255;
+                }
+                if (progress >= 1 && tile.isMergedResult) {
+                    tile.isMergedResult = false; // Animation finished
+                }
+
+                ctx.save(); // Save current canvas state
+
+                // Apply alpha
+                ctx.globalAlpha = alpha / 255;
+
+                // Center for scaling
+                const centerX = x + TILE_SIZE / 2;
+                const centerY = y + TILE_SIZE / 2;
+                ctx.translate(centerX, centerY);
+                ctx.scale(scale, scale);
+                ctx.translate(-centerX, -centerY);
+
+                // Draw tile background
+                ctx.fillStyle = getTileColor(tile.value);
+                roundRect(ctx, x, y, TILE_SIZE, TILE_SIZE, 8);
+                ctx.fill();
+
+                // Draw tile border
+                ctx.strokeStyle = 'rgba(0,0,0,0.1)'; // Light black border
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Draw tile value
+                ctx.fillStyle = TEXT_COLOR;
+                ctx.font = `bold ${TILE_SIZE * 0.4}px 'Inter'`; // Adjust font size dynamically
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(tile.value, x + TILE_SIZE / 2, y + TILE_SIZE / 2);
+
+                ctx.restore(); // Restore canvas state
+            });
+
+            // Remove tiles that have finished disappearing
+            allActiveTiles = allActiveTiles.filter(tile => !tilesToRemove.includes(tile));
+
+            // Draw subliminal messages
+            const messagesToRemove = [];
+            activeSubliminalMessages.forEach(msg => {
+                const elapsed = currentTime - msg.startTime;
+                if (elapsed < SUBLIMINAL_MESSAGE_DURATION) {
+                    const alpha = Math.max(0, Math.floor(255 * (1 - (elapsed / SUBLIMINAL_MESSAGE_DURATION))));
+                    const currentY = msg.initialY - (elapsed / SUBLIMINAL_MESSAGE_DURATION) * 50; // Move up 50px
+
+                    ctx.save();
+                    ctx.globalAlpha = alpha / 255;
+                    ctx.fillStyle = '#4CAF50'; // Green color
+                    ctx.font = `bold 28px 'Inter'`; // Subliminal message font size
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(msg.text, msg.x, currentY);
+                    ctx.restore();
+                } else {
+                    messagesToRemove.push(msg);
+                }
+            });
+            activeSubliminalMessages = activeSubliminalMessages.filter(msg => !messagesToRemove.includes(msg));
+
+            if (isGameStarted && !isGameOver && !isGameWon) {
+                requestAnimationFrame(drawGame); // Continue animation loop
+            }
+        }
+
+        // --- Event Listeners ---
+
+        startButton.addEventListener('click', () => {
+            startScreen.classList.add('hidden');
+            isGameStarted = true;
+            initializeGame();
+            addRandomTile();
+            addRandomTile();
+            requestAnimationFrame(drawGame); // Start drawing loop
+        });
+
+        resetButton.addEventListener('click', () => {
+            initializeGame();
+            startScreen.classList.add('hidden'); // Ensure start screen is hidden
+            isGameStarted = true;
+            addRandomTile();
+            addRandomTile();
+            requestAnimationFrame(drawGame); // Restart drawing loop
+        });
+
+        tryAgainButton.addEventListener('click', () => {
+            initializeGame();
+            startScreen.classList.add('hidden'); // Ensure start screen is hidden
+            isGameStarted = true;
+            addRandomTile();
+            addRandomTile();
+            requestAnimationFrame(drawGame); // Restart drawing loop
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (!isGameStarted || isGameOver || isGameWon) return;
+
+            let moved = false;
+            switch (e.key) {
+                case 'ArrowLeft':
+                    moved = move('left');
+                    break;
+                case 'ArrowRight':
+                    moved = move('right');
+                    break;
+                case 'ArrowUp':
+                    moved = move('up');
+                    break;
+                case 'ArrowDown':
+                    moved = move('down');
+                    break;
+            }
+            if (moved) {
+                checkGameStatus();
+            }
+        });
+
+        // Initial setup
+        initializeGame();
+        drawBackgroundText(); // Draw background text initially
+        // Resize background text on window resize
+        window.addEventListener('resize', drawBackgroundText);
+
+        // Ensure canvas matches container size
+        const gameContainer = document.getElementById('game-container');
+        canvas.width = gameContainer.offsetWidth - (GAP * 2); // Account for padding
+        canvas.height = gameContainer.offsetHeight - (GAP * 2) - 70; // Account for header/padding
+        
+        // Initial draw for start screen
+        // No need to call drawGame here, as the startScreen is visible initially.
+        // The drawGame will be called when the start button is clicked.
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>🎮 미니게임</title>
+    <style>
+        body {
+            font-family: Arial;
+            text-align: center;
+            padding: 100px;
+            background-color: #eef5e7;
+        }
+        button {
+            font-size: 18px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            margin-top: 30px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+ <!DOCTYPE html>
+<html lang="ko">
+<head>
+ <body>
+    <!-- 미니게임 콘텐츠 영역 -->
+    
+    <!-- 메인 메뉴로 돌아가기 버튼 -->
+    <div style="text-align: center; margin-top: 30px;">
+        <button onclick="window.location.href='index.html'">메인 메뉴로 돌아가기</button>
+    </div>
+</body>
