@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>subminiral</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', 'Inter', sans-serif;
+        }
+        #chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+        #chat-messages::-webkit-scrollbar-track {
+            background: #1e3a8a;
+        }
+        #chat-messages::-webkit-scrollbar-thumb {
+            background-color: #3b82f6;
+            border-radius: 10px;
+            border: 2px solid #1e3a8a;
+        }
+    </style>
+</head>
+<body class="bg-blue-900 flex items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-lg mx-4 h-[90vh] max-h-[700px] bg-blue-800 rounded-2xl shadow-2xl flex flex-col">
+        
+        <header id="comfort-header" class="p-4 text-center text-blue-200 bg-blue-900/50 rounded-t-2xl transition-all duration-1000 ease-in-out">
+            <p class="text-sm italic"></p>
+        </header>
+
+        <div id="chat-messages" class="flex-1 p-6 overflow-y-auto space-y-4">
+        </div>
+
+        <footer class="p-4 bg-blue-900/50 rounded-b-2xl">
+            <form id="chat-form" class="flex items-center space-x-3">
+                <input type="text" id="user-input" placeholder="하고 싶은 이야기를 들려주세요..."
+                    class="flex-1 p-3 bg-blue-700 text-white placeholder-blue-300 border border-blue-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition">
+                <button type="submit"
+                    class="px-5 py-3 bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 active:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 transition transform hover:scale-105">
+                    전송
+                </button>
+            </form>
+        </footer>
+    </div>
+
+    <script>
+        const comfortHeader = document.getElementById('comfort-header').querySelector('p');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+
+        const comfortingPhrases = [
+            "오늘 하루도 정말 수고 많았어요.", "당신은 생각보다 훨씬 강한 사람이에요.", "잠시 쉬어가도 괜찮아요.", "당신의 존재만으로도 충분히 소중해요.", "이곳에서는 어떤 이야기를 해도 괜찮아요.", "마음에도 환기가 필요해요.", "작은 행복이 모여 큰 기쁨이 될 거예요.", "괜찮지 않아도 괜찮아요.", "당신의 속도대로 천천히 걸어가요.", "스스로를 너무 다그치지 마세요."
+        ];
+
+        // --- 챗봇 대화 상태 관리 ---
+        let conversationState = {
+            lastTopicKey: null,
+            contextualTurn: 0, // 맥락이 유지되는 턴 수
+        };
+
+        // --- 챗봇 대화 로직 (랜덤성 강화) ---
+        const botResponses = {
+            greeting: "안녕하세요. 어떤 이야기를 들려주실 건가요? 편안하게 말씀해주세요.",
+            default: {
+                responses: ["그렇구나..... 많이 힘들었지? 힘들었던마음 여기에 전부 말해봐. 내가 다 들어줄께", "마음이 많이 힘드셨겠어요.", "그 감정, 온전히 느끼고 표현해도 괜찮아. 다른사람들 시선신경쓰지말고 너가 하고싶으면 고민하지말고 해.", "이야기해주셔서 감사해요. 계속 듣고 있어요."]
+            },
+            farewell: {
+                responses: ["언제든 또 이야기하고 싶을 때 찾아주세요.", "오늘 저와 이야기 나눠주셔서 감사해요.", "당신은 혼자가 아니라는 걸 기억해주세요.", "이야기해주셔서 고마워요. 다음에 또 만나요."]
+            },
+            keywords: [
+                {
+                    key: 'masked',
+                    coreEmotion: '고립감',
+                    keys: ["괜찮은 척", "웃어야", "힘든 티", "아무도 몰라", "밝은 척", "지쳤어"],
+                    acknowledgement: "겉으로는 괜찮아 보여야 한다는 마음 때문에 많이 힘드셨군요.",
+                    responses: ["그렇게 웃어 보이기 위해 얼마나 많은 에너지를 쓰셨을지 짐작이 가요.", "가면 뒤에 진짜 감정을 숨겨두는 일이 반복되면, 나중에는 내 진짜 마음이 뭔지 헷갈리기도 하죠."],
+                    followUps: ["그렇게 괜찮은 척해야만 했던 특별한 이유가 있었을까요?", "가면을 벗고 온전히 쉴 수 있는 순간은 언제인가요?"]
+                },
+                {
+                    key: 'physical',
+                    coreEmotion: '소진',
+                    keys: ["머리 아파", "소화 안돼", "잠이 안와", "피곤해", "몸이 무거워"],
+                    acknowledgement: "마음이 힘드니 몸까지 신호를 보내고 있는 것 같네요.",
+                    responses: ["천근만근 무거운 몸을 이끌고 하루를 버텨내는 것만으로도 정말 대단한 일이에요.", "몸의 긴장을 푸는 것만으로도 마음이 한결 가벼워질 수 있어요. 숨을 한 번 깊게 들이쉬고, 천천히 내쉬어보세요."],
+                    followUps: ["몸이 이렇게 힘들 때, 마음은 어떤 기분인가요?", "어떻게 하면 몸과 마음이 조금이라도 편안해질 수 있을까요?"]
+                },
+                {
+                    key: 'atypical',
+                    coreEmotion: '무기력',
+                    keys: ["계속 먹어", "잠만 자", "졸려", "무기력해", "의욕이 없어"],
+                    acknowledgement: "몸과 마음에 에너지가 모두 방전된 듯한 무기력함을 느끼고 계시는군요.",
+                    responses: ["에너지를 아끼려는 우리 몸의 자연스러운 반응일 수 있어요. 스스로를 너무 탓하지 마세요.", "좋은 일이 생기면 잠시 기분이 나아지는 건, 마음에 아직 희망의 불씨가 남아있다는 증거일지도 몰라요."],
+                    followUps: ["그 무기력함이 파도처럼 밀려올 때, 주로 어떤 생각을 하게 되나요?", "에너지가 1%라도 생긴다면, 가장 먼저 하고 싶은 작은 일은 무엇인가요?"]
+                },
+                {
+                    key: 'self-blame',
+                    coreEmotion: '무가치함',
+                    keys: ["잘하는게 없어", "쓸모없어", "나만 왜이럴까", "자책", "내 탓이야"],
+                    acknowledgement: "스스로를 너무 가혹하게 탓하고 계시는군요.",
+                    responses: ["만약 가장 친한 친구가 같은 상황이라면, 당신은 똑같이 말해줄 건가요? 스스로에게도 친구처럼 다정해져도 괜찮아요.", "결과가 어떻든, 노력했던 과정과 그 마음은 사라지지 않아요. 당신의 노력을 가장 잘 아는 건 바로 당신 자신이잖아요."],
+                    followUps: ["스스로를 탓하는 목소리가 들려올 때, 그 목소리는 주로 어떤 말을 하나요?", "자신에게서 단 한 가지 칭찬해주고 싶은 점을 찾아본다면, 무엇이 있을까요?"]
+                },
+                {
+                    key: 'general-negative',
+                    coreEmotion: '슬픔',
+                    keys: ["슬퍼", "힘들어", "괴로워", "답답해", "눈물 나", "우울해"],
+                    acknowledgement: "마음이 많이 힘드시군요.",
+                    responses: ["어떤 말로도 그 슬픔이 다 위로되지 않겠지만, 이야기해주셔서 정말 감사해요.", "그 감정들을 억지로 누르거나 떨쳐내려고 하지 않아도 괜찮아요."],
+                    followUps: ["무엇이 당신을 가장 힘들게 하나요?", "그 감정의 이름을 붙여본다면, 뭐라고 부를 수 있을까요?"]
+                }
+            ]
+        };
+
+        // --- 함수 정의 ---
+
+        function showRandomPhrase() {
+            const randomIndex = Math.floor(Math.random() * comfortingPhrases.length);
+            comfortHeader.style.opacity = 0;
+            setTimeout(() => {
+                comfortHeader.textContent = comfortingPhrases[randomIndex];
+                comfortHeader.style.opacity = 1;
+            }, 500);
+        }
+
+        function displayMessage(sender, text) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('p-3', 'rounded-xl', 'max-w-xs', 'md:max-w-md', 'break-words', 'animate-fade-in');
+            if (sender === 'user') {
+                messageElement.classList.add('bg-blue-500', 'text-white', 'self-end', 'ml-auto');
+            } else {
+                messageElement.classList.add('bg-blue-700', 'text-blue-100', 'self-start', 'mr-auto');
+            }
+            messageElement.textContent = text;
+            chatMessages.appendChild(messageElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        function getFreshResponse(responses) {
+            return responses[Math.floor(Math.random() * responses.length)];
+        }
+
+        function getBotResponse(userInputText) {
+            const lowerCaseInput = userInputText.toLowerCase();
+
+            // 1. 종료 인사 확인
+            if (["안녕", "잘가", "그만할래"].some(word => lowerCaseInput.includes(word))) {
+                conversationState = { lastTopicKey: null, contextualTurn: 0 };
+                return getFreshResponse(botResponses.farewell.responses);
+            }
+
+            let matchedCategory = null;
+            for (const category of botResponses.keywords) {
+                if (category.keys.some(key => lowerCaseInput.includes(key))) {
+                    matchedCategory = category;
+                    break;
+                }
+            }
+
+            // 2. 새로운 주제를 찾았을 경우, 응답과 질문을 합쳐서 랜덤으로 응답
+            if (matchedCategory) {
+                conversationState.lastTopicKey = matchedCategory.key;
+                conversationState.contextualTurn = 1; // 맥락 시작
+
+                const possibleResponses = [
+                    `${matchedCategory.acknowledgement} ${getFreshResponse(matchedCategory.responses)}`,
+                    ...matchedCategory.followUps
+                ];
+                
+                return getFreshResponse(possibleResponses);
+            }
+
+            // 3. 주제를 찾지 못했지만, 이전 대화 맥락이 있는 경우 (2턴까지 유효)
+            if (conversationState.lastTopicKey && conversationState.contextualTurn < 2) {
+                const lastTopicCategory = botResponses.keywords.find(cat => cat.key === conversationState.lastTopicKey);
+                conversationState.contextualTurn++;
+
+                const possibleResponses = [
+                    `${lastTopicCategory.acknowledgement} ${getFreshResponse(lastTopicCategory.responses)}`,
+                    ...lastTopicCategory.followUps
+                ];
+                return getFreshResponse(possibleResponses);
+            }
+
+            // 4. 모든 조건에 맞지 않으면 대화 상태 완전 초기화 후 기본 응답
+            conversationState = { lastTopicKey: null, contextualTurn: 0 };
+            return getFreshResponse(botResponses.default.responses);
+        }
+
+        // --- 이벤트 리스너 및 초기화 ---
+
+        chatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const userInputText = userInput.value.trim();
+            if (userInputText) {
+                displayMessage('user', userInputText);
+                userInput.value = '';
+                setTimeout(() => {
+                    const botMessage = getBotResponse(userInputText);
+                    displayMessage('bot', botMessage);
+                }, 1000 + Math.random() * 500);
+            }
+        });
+
+        function initializeChat() {
+            showRandomPhrase();
+            setInterval(showRandomPhrase, 10000);
+            setTimeout(() => {
+                displayMessage('bot', botResponses.greeting);
+            }, 1000);
+            const style = document.createElement('style');
+            style.innerHTML = `
+                @keyframes fade-in {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .animate-fade-in {
+                    animation: fade-in 0.5s ease-out forwards;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        initializeChat();
+    </script>
+</body>
+</html>
